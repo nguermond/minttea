@@ -1,4 +1,69 @@
+module History = struct
+  (* History is represented as a pair of stacks.
+   * This allows insertion at a certain point in history.
+   * For example, say we are given history
+   *    "hello", "wold", "asdf", "qwer", [""]
+   * we can edit "wold" to "world" to obtain the history
+   * "hello", "wold", ["world"], "asdf", "qwer"
+   *        ^             ^             ^
+   *    bwd stack       buffer       fwd stack
+   * Once "world" is pushed in the history we obtain the history
+   * "hello", "wold", "world", [""], "asdf", "qwer"
+   *)
+     
+  type t = { active : bool;     (* whether history is active *)
+             fwd : string list;
+             bwd : string list;
+             buffer : string option;
+           }
+         
+  let empty : t =
+    { active = false; buffer = None; fwd = []; bwd = [] }
+    
+  let push_fwd str h : t =
+    { h with fwd = str :: h.fwd }
+    
+  let push_bwd str h : t =
+    { h with bwd = str :: h.bwd }
+
+  let pop_fwd h : (string option) * t =
+    match h.fwd with
+    | [] -> (None, h)
+    | x :: xs -> (Some x, {h with fwd = xs })
+
+  let pop_bwd h : (string option) * t =
+    match h.bwd with
+    | [] -> (None, h)
+    | x :: xs -> (Some x, {h with bwd = xs })
+
+  let bwd h =
+    let (h, buffer) =
+      match pop_bwd h, h.buffer with
+      | (None,h), _ -> (h, h.buffer)
+      | (Some value,h), None -> (h, Some value)
+      | (Some value,h), Some buf -> (push_fwd buf h, Some value)
+    in {h with buffer}
+     
+  let fwd h =
+    let (h, buffer) =
+      match pop_fwd h, h.buffer with
+      | (None, h), None -> (h,None)
+      | (None, h), Some buf -> (push_bwd buf h, None)
+      | (Some value, h), None -> (h, Some value)
+      | (Some value, h), Some buf -> (push_bwd buf h, Some value)
+    in {h with buffer }
+     
+  let push str h =
+    let h = (match h.buffer with
+    | None -> h
+    | Some v -> push_bwd v h) in
+    let h = push_bwd str h in
+    { h with buffer = None; active = true }
+end
+
+
 type t = {
+  (* text field *)
   value : string;
   placeholder : string;
   prompt : string;
@@ -9,6 +74,8 @@ type t = {
   (* styles *)
   text_style : Spices.style;
   placeholder_style : Spices.style;
+  (* history *)
+  history : History.t;
 }
 
 (* Utils *)
@@ -31,10 +98,13 @@ let default_placeholder_style = Spices.default |> Spices.faint true
 let default_cursor () = Cursor.make ()
 let resume_blink_after = 0.25
 
-let make value ?(text_style = default_text_style)
+let make value
+    ?(text_style = default_text_style)
     ?(placeholder_style = default_placeholder_style)
-    ?(cursor = default_cursor ()) ?(placeholder = default_placeholder)
+    ?(cursor = default_cursor ())
+    ?(placeholder = default_placeholder)
     ?(prompt = default_prompt) () =
+  let history = History.empty in
   let value, pos =
     if String.length value = 0 then ("", 0) else (value, String.length value)
   in
@@ -47,6 +117,7 @@ let make value ?(text_style = default_text_style)
     cursor;
     prompt;
     last_action = now_secs ();
+    history;
   }
 
 let empty () = make "" ()
@@ -125,8 +196,27 @@ let move_cursor t action =
 
 let character_backward t = move_cursor t `Character_backward
 let character_forward t = move_cursor t `Character_forward
-let jump_to_beginning t = move_cursor t `Jump_to_beginning
+let jump_to_beginning t = move_cursor t `Jump_to_beginning [@@warning "-32"]
 let jump_to_end t = move_cursor t `Jump_to_end
+
+let history_bwd t =
+  if t.history.active then
+    let h = t.history in
+    let h = History.bwd h in
+    match h.buffer with
+    | None -> { t with history = h }
+    | Some value -> { t with value; history = h } |> jump_to_end
+  else t
+  
+let history_fwd t =
+  if t.history.active then
+    let h = t.history in
+    let h = History.fwd h in
+    match h.buffer with 
+    | None -> { t with value = ""; history = h } |> jump_to_end
+    | Some value -> { t with value; history = h } |> jump_to_end
+  else t
+  
 
 let update t (e : Minttea.Event.t) =
   match e with
@@ -134,10 +224,7 @@ let update t (e : Minttea.Event.t) =
       let s =
         match (key, modifier) with
         (* Movement *)
-        | Up, _ -> jump_to_beginning t
         | Key s, Ctrl when s = "a" -> jump_to_beginning t
-
-        | Down, _ -> jump_to_end t
         | Key s, Ctrl when s = "e" -> jump_to_end t
 
         | Left, _ -> character_backward t
@@ -146,6 +233,10 @@ let update t (e : Minttea.Event.t) =
         | Right, _ -> character_forward t
         | Key s, Ctrl when s = "f" -> character_forward t
 
+        (* History *)
+        | Down, _ -> history_fwd t
+        | Up, _ -> history_bwd t
+
         (* Typing *)
         | Backspace, _ -> backspace t
         | Key s, _ -> write t s
@@ -153,7 +244,7 @@ let update t (e : Minttea.Event.t) =
         | Escape, _ | Enter, _ -> t
       in
 
-      { s with cursor = Cursor.focus t.cursor; last_action = now_secs () }
+      { s with cursor = Cursor.focus (* true *) t.cursor; last_action = now_secs () }
   | _ ->
       let time_since_last_action = now_secs () -. t.last_action in
 
@@ -165,3 +256,13 @@ let update t (e : Minttea.Event.t) =
       { t with cursor = Cursor.update updated_cursor e }
 
 let set_text value t = { t with value } |> jump_to_end
+
+let focus b t = { t with cursor = Cursor.focus b t.cursor }
+
+let push_to_history str t =
+  let history = History.push str t.history in
+  { t with history }
+
+let set_prompt str t =
+  let prompt = str in
+  { t with prompt }

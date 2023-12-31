@@ -42,3 +42,8 @@ val enable_blink : t -> t
 
 val disable_blink : t -> t
 (** [disable_blink t] disables blinking for the cursor [t]. *)
+
+(* val focus : bool -> t -> t *)
+(* (\** [focus b t] makes the cursor [t] visible if [b] is true and *)
+(*     invisible if [b] is false. *)
+(*  *\) *)

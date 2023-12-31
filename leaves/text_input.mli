@@ -64,3 +64,20 @@ val set_text : string -> t -> t
       (* Text_input.current_text new_text == "world" *)
     ]}
 *)
+
+val focus : bool -> t -> t
+(**
+   Focus the text input if set to true,
+   and unfocus otherwise.
+ *)
+
+                           
+val push_to_history : string -> t -> t
+(**
+   Push value to history. History can be navigated with Up/Down keys.
+ *)
+  
+val set_prompt : string -> t -> t
+(**
+   Change the prompt.
+ *)
