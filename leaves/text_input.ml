@@ -244,7 +244,7 @@ let update t (e : Minttea.Event.t) =
         | Escape, _ | Enter, _ -> t
       in
 
-      { s with cursor = Cursor.focus (* true *) t.cursor; last_action = now_secs () }
+      { s with cursor = Cursor.focus t.cursor; last_action = now_secs () }
   | _ ->
       let time_since_last_action = now_secs () -. t.last_action in
 
@@ -257,7 +257,8 @@ let update t (e : Minttea.Event.t) =
 
 let set_text value t = { t with value } |> jump_to_end
 
-let focus b t = { t with cursor = Cursor.focus b t.cursor }
+let focus b t = { t with cursor = if b then Cursor.focus t.cursor
+                                  else Cursor.unfocus t.cursor }
 
 let push_to_history str t =
   let history = History.push str t.history in
